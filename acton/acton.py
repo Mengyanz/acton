@@ -95,7 +95,8 @@ def simulate_active_learning(
         repeated_labelling: bool = True,
         inc_sub: bool = False,
         subn_entities: int=0,
-        subn_relations: int=0):
+        subn_relations: int=0,
+        update_one: bool=True):
     """Simulates an active learning task.
 
     Parameters
@@ -130,6 +131,11 @@ def simulate_active_learning(
         number of entities for subsampling
     subn_relations
         number of relations for subsampling
+    update_one
+        Boolean variable
+        True: only update posterior entity and relations 
+                related to the new label
+        False: update all 
     """
     validate_recommender(recommender)
     validate_predictor(predictor)
@@ -224,7 +230,8 @@ def simulate_active_learning(
             predictor.fit(labelled_ids,
                           inc_sub=inc_sub,
                           subn_entities=subn_entities,
-                          subn_relations=subn_relations)
+                          subn_relations=subn_relations,
+                          update_one= update_one)
         else:
             predictor.fit(labelled_ids)
         logging.debug('(Took {:.02} s.)'.format(time.time() - then))

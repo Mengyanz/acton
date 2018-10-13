@@ -494,7 +494,8 @@ class TensorPredictor(Predictor):
     def __init__(self,
                  db: acton.database.Database,
                  n_particles: int = 5,
-                 var_r: int = 1, var_e: int = 1,
+                 var_r: float = 1.0, var_e: float = 1.0,
+                 mean_r: float = 0.0, mean_e: float = 0.0,
                  var_x: float = 0.1,
                  sample_prior: bool = False,
                  n_jobs: int=1
@@ -510,6 +511,10 @@ class TensorPredictor(Predictor):
             variance of prior of R
         var_e
             variance of prior of E
+        mean_r
+            mean of prior of R
+        mean_e
+            mean of prior of E
         var_x
             variance of X
         sample_prior
@@ -517,12 +522,16 @@ class TensorPredictor(Predictor):
         """
         self._db = db
         self.n_particles = n_particles
-        self.var_r = var_r
         self.var_e = var_e
+        self.var_r = var_r
+        self.mean_e = mean_e
+        self.mean_r = mean_r
         self.var_x = var_x
 
         self.var_e = numpy.ones(self.n_particles) * self.var_e
         self.var_r = numpy.ones(self.n_particles) * self.var_r
+        self.mean_e = numpy.ones(self.n_particles) * self.mean_e
+        self.mean_r = numpy.ones(self.n_particles) * self.mean_r
 
         self.p_weights = numpy.ones(self.n_particles) / self.n_particles
 
@@ -538,7 +547,8 @@ class TensorPredictor(Predictor):
     def fit(self, ids: Iterable[tuple],
             inc_sub: bool,
             subn_entities: int,
-            subn_relations: int):
+            subn_relations: int,
+            update_one: bool = False):
         """Update posteriors.
 
         Parameters
@@ -551,6 +561,11 @@ class TensorPredictor(Predictor):
             number of entities for subsampling
         subn_relations
             number of relations for subsampling
+        update_one 
+            Boolean variable
+            True: only update posterior entity and relations 
+                  related to the new label
+            False: update all 
 
         Returns
         -------
@@ -584,6 +599,7 @@ class TensorPredictor(Predictor):
             numpy.nonzero(numpy.sum(numpy.sum(self.X, 1), 1))[0]
         # totoal_size = self.n_relations * self.n_entities * self.n_dim
 
+        # subsampling 
         if numpy.sum(self.obs_sum) > 1000:
             self.subn_entities = 10
             self.subn_relations = 10
@@ -597,6 +613,7 @@ class TensorPredictor(Predictor):
 
         # only consider the situation where one element is recommended each time
         next_idx = ids[-1]
+        logging.debug('new index: {} and label: {}'.format(next_idx, self.X[next_idx]))
 
         self.p_weights *= \
             self.compute_particle_weight(next_idx, cur_obs, obs_mask)
@@ -620,22 +637,31 @@ class TensorPredictor(Predictor):
             sub_entids = numpy.random.choice(
                 self.n_entities, self.subn_entities, replace=False)
 
-        for p in range(self.n_particles):
-            self._sample_relations(
-                cur_obs, obs_mask,
-                self.E[p],
-                self.R[p],
-                self.var_r[p],
-                sub_relids
+        if update_one:
+            for p in range(self.n_particles):
+                self._sample_latent_variables(
+                    next_idx, self.X[next_idx], 
+                    self.mean_e[p], self.mean_r[p],
+                    self.var_e[p], self.var_r[p],
+                    self.E[p], self.R[p]
                 )
-            self._sample_entities(
-                cur_obs,
-                obs_mask,
-                self.E[p],
-                self.R[p],
-                self.var_e[p],
-                sub_entids
-                )
+        else:
+            for p in range(self.n_particles):
+                self._sample_relations(
+                    cur_obs, obs_mask,
+                    self.E[p],
+                    self.R[p],
+                    self.var_r[p],
+                    sub_relids
+                    )
+                self._sample_entities(
+                    cur_obs,
+                    obs_mask,
+                    self.E[p],
+                    self.R[p],
+                    self.var_e[p],
+                    sub_entids
+                    )
 
         if self.sample_prior:
             self._sample_prior()
@@ -821,6 +847,115 @@ class TensorPredictor(Predictor):
             mu, inv_lambda).reshape([self.n_dim, self.n_dim])
         numpy.mean(numpy.diag(inv_lambda))
         # logging.info('Mean variance R, %d, %f', k, mean_var)
+
+    def _sample_latent_variables(
+            self, index, label, mean_e, mean_r, var_e, var_r, E, R):
+        '''
+        In t^th iteration, we get the new label x_ikj. 
+        Then update e_i, e_j, r_k using the new label.
+
+        Parameters:
+        -------------
+        index
+            index tuple (k, i, j) of the new label
+        label
+            label x_kij, 0 or 1.
+        mean_e
+            mean of entity
+        mean_r 
+            mean of relation
+        var_e
+            variance of entitiy (sigma_e ^2)
+        var_r
+            variance of relation (sigma_r ^2)
+        E
+            posterior of latent entity variable R^{N x D}
+            updated from last iteration
+        R 
+            posterior of latent relation variable R^{ K x D x D}
+            updated from last iteration
+        '''
+
+        if isinstance(var_e, float) and isinstance(var_r, float)\
+                and isinstance(mean_e, float) and isinstance(mean_r, float):
+            var_e = numpy.identity(self.n_dim) * var_e         # D x D
+            var_r = numpy.identity(self.n_dim ** 2) * var_r    # D^2 x D^2
+            mean_e = numpy.ones((self.n_dim, 1)) * mean_e      # D x 1
+            mean_r = numpy.ones((self.n_dim ** 2, 1)) * mean_r # D^2 x 1
+
+        # sample relation r_k
+        k, i, j = index
+        e_i = E[i].T # D x 1
+        e_j = E[j].T # D x 1
+        r_k = R[k].T # D x D
+        
+        EXE = numpy.kron(e_i, e_j) # D^2 x 1
+        EXE = EXE.reshape((EXE.shape[0], 1))
+    
+        # D^2 x D^2
+        s_rn = numpy.linalg.inv(
+            numpy.linalg.inv(var_r) +
+            numpy.dot(EXE, EXE.T)/self.var_x
+        )
+        pp = numpy.dot(numpy.linalg.inv(var_r), mean_r) + EXE * label/self.var_x
+        # D^2 x 1
+        m_rn = numpy.dot(
+            s_rn,
+            numpy.dot(numpy.linalg.inv(var_r), mean_r) + EXE * label/self.var_x
+        )
+
+        mean_r = m_rn
+        var_r = s_rn
+
+        m_rn = m_rn.reshape(m_rn.shape[0]).tolist()
+        R[k] = multivariate_normal(
+            m_rn, s_rn).reshape([self.n_dim, self.n_dim])
+
+        # sample entity e_i
+
+        RE = numpy.dot(r_k, e_j) # D x 1
+        RE = RE.reshape((RE.shape[0], 1))
+
+        # D x D
+        s_en = numpy.linalg.inv(
+            numpy.linalg.inv(var_e) + 
+            numpy.dot(RE, RE.T)/self.var_x
+        )
+
+        # D x 1
+        m_en = numpy.dot(
+            s_en, 
+            numpy.dot(numpy.linalg.inv(var_e), mean_e) + RE * label/self.var_x
+        )
+
+        mean_e = m_en
+        var_e = s_en
+
+        m_en = m_en.reshape(m_en.shape[0]).tolist()
+        E[i] = multivariate_normal(m_en, s_en)
+
+        # sample entity e_j
+
+        ETR = numpy.dot(e_i.T, r_k) # D x 1
+        ETR = ETR.reshape((1, ETR.shape[0]))
+
+        # D x D
+        s_en = numpy.linalg.inv(
+            numpy.linalg.inv(var_e) + 
+            numpy.dot(ETR.T, ETR)/self.var_x
+        )
+
+        # D x 1
+        m_en = numpy.dot(
+            s_en,
+            numpy.dot(numpy.linalg.inv(var_e), mean_e) + ETR.T * label/self.var_x)
+
+        mean_e = m_en
+        var_e = s_en
+
+        m_en = m_en.reshape(m_en.shape[0]).tolist()
+        E[j] = multivariate_normal(m_en, s_en)
+
 
 # Helper functions to generate predictor classes.
 

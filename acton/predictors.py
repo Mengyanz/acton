@@ -526,12 +526,7 @@ class TensorPredictor(Predictor):
         self.var_r = var_r
         self.mean_e = mean_e
         self.mean_r = mean_r
-        self.var_x = var_x
-
-        self.var_e = list(numpy.ones(self.n_particles) * self.var_e)
-        self.var_r = list(numpy.ones(self.n_particles) * self.var_r)
-        self.mean_e = list(numpy.ones(self.n_particles) * self.mean_e)
-        self.mean_r = list(numpy.ones(self.n_particles) * self.mean_r)
+        self.var_x = var_x    
 
         self.p_weights = numpy.ones(self.n_particles) / self.n_particles
 
@@ -633,16 +628,44 @@ class TensorPredictor(Predictor):
             else:
                 next_idxs = [next_idx]
 
+            if isinstance(self.var_e, float) and isinstance(self.var_r, float)\
+                    and isinstance(self.mean_e, float) and isinstance(self.mean_r, float):
+                self.mean_e = numpy.ones((
+                    self.n_particles, self.n_entities, self.n_dim)) * self.mean_e      # P x N x D 
+                self.mean_r = numpy.ones((
+                    self.n_particles, self.n_relations, self.n_dim ** 2)) * self.mean_r    # P x K x D^2
+
+                var_e = self.var_e
+                var_r = self.var_r
+                # P x N x D x D
+                self.var_e = numpy.zeros((
+                    self.n_particles, self.n_entities, self.n_dim, self.n_dim))
+                # P x N x D^2 x D^2
+                self.var_r = numpy.zeros((
+                    self.n_particles, self.n_relations, self.n_dim ** 2, self.n_dim ** 2))
+
+                for p in range(self.n_particles):
+                    for i in range(self.var_e.shape[1]):
+                        self.var_e[p][i]= numpy.identity(self.n_dim) * var_e 
+                    for k in range(self.var_r.shape[1]):
+                        self.var_r[p][k] = numpy.identity(self.n_dim ** 2) * var_r  
+            else:
+                self.var_e = list(numpy.ones(self.n_particles) * self.var_e)
+                self.var_r = list(numpy.ones(self.n_particles) * self.var_r)
+                self.mean_e = list(numpy.ones(self.n_particles) * self.mean_e)
+                self.mean_r = list(numpy.ones(self.n_particles) * self.mean_r)  
+                
+
             for next_idx in next_idxs:
                 for p in range(self.n_particles):
                     logging.debug('update one: {} using label: {}'.format(next_idx, self.X[next_idx]))
-                    self.mean_e[p], self.mean_r[p], self.var_e[p], self.var_r[p]=\
-                        self._sample_latent_variables(
-                            next_idx, self.X[next_idx], 
-                            self.mean_e[p], self.mean_r[p],
-                            self.var_e[p], self.var_r[p],
-                            self.E[p], self.R[p]
-                            )
+                    #self.mean_e[p], self.mean_r[p], self.var_e[p], self.var_r[p]=\
+                    self._sample_latent_variables(
+                        next_idx, self.X[next_idx], 
+                        self.mean_e[p], self.mean_r[p],
+                        self.var_e[p], self.var_r[p],
+                        self.E[p], self.R[p]
+                        )
             logging.debug('E[0]: {}'.format(self.E[0]))
         else:
             if self.subn_entities == self.n_entities \
@@ -887,12 +910,6 @@ class TensorPredictor(Predictor):
             updated from last iteration
         '''
 
-        if isinstance(var_e, float) and isinstance(var_r, float)\
-                and isinstance(mean_e, float) and isinstance(mean_r, float):
-            var_e = numpy.identity(self.n_dim) * var_e         # D x D
-            var_r = numpy.identity(self.n_dim ** 2) * var_r    # D^2 x D^2
-            mean_e = numpy.ones((self.n_dim, 1)) * mean_e      # D x 1
-            mean_r = numpy.ones((self.n_dim ** 2, 1)) * mean_r # D^2 x 1
 
         logging.debug('mean_e: {}'.format(mean_e))
 
@@ -901,75 +918,79 @@ class TensorPredictor(Predictor):
         e_i = E[i].T # D x 1
         e_j = E[j].T # D x 1
         r_k = R[k].T # D x D
+
+        # avoid LinAlgError: Singular matrix error
+        m = 10**-6
+        var_r[k] += numpy.identity(var_r[k].shape[0]) * m
+        var_e[i] += numpy.identity(var_e[i].shape[0]) * m
+        var_e[j] += numpy.identity(var_e[j].shape[0]) * m
         
         EXE = numpy.kron(e_i, e_j) # D^2 x 1
-        EXE = EXE.reshape((EXE.shape[0], 1))
+        # EXE = EXE.reshape((EXE.shape[0], 1))
     
         # D^2 x D^2
-        s_rn = numpy.linalg.inv(
-            numpy.linalg.inv(var_r) +
-            numpy.dot(EXE, EXE.T)/self.var_x
-        )
+        s_rn_inv =  numpy.linalg.inv(var_r[k]) + numpy.dot(EXE, EXE.T)/self.var_x
+        s_rn_inv += numpy.identity(s_rn_inv.shape[0]) * m
+        s_rn = numpy.linalg.inv(s_rn_inv)
 
         # D^2 x 1
         m_rn = numpy.dot(
             s_rn,
-            numpy.dot(numpy.linalg.inv(var_r), mean_r) + EXE * label/self.var_x
+            numpy.dot(numpy.linalg.inv(var_r[k]), mean_r[k]) + EXE * label/self.var_x
         )
 
-        mean_r = m_rn
-        var_r = s_rn
+        mean_r[k] = m_rn
+        var_r[k] = s_rn
 
-        m_rn = m_rn.reshape(m_rn.shape[0]).tolist()
+        # m_rn = m_rn.reshape(m_rn.shape[0]).tolist()
         R[k] = multivariate_normal(
             m_rn, s_rn).reshape([self.n_dim, self.n_dim])
 
         # sample entity e_i
 
         RE = numpy.dot(r_k, e_j) # D x 1
-        RE = RE.reshape((RE.shape[0], 1))
+        # RE = RE.reshape((RE.shape[0], 1))
 
         # D x D
-        s_en = numpy.linalg.inv(
-            numpy.linalg.inv(var_e) + 
-            numpy.dot(RE, RE.T)/self.var_x
-        )
+        s_en_inv = numpy.linalg.inv(var_e[i]) + numpy.dot(RE, RE.T)/self.var_x
+        s_en_inv += numpy.identity(s_en_inv.shape[0]) * m
+        s_en = numpy.linalg.inv(s_en_inv)
 
         # D x 1
         m_en = numpy.dot(
             s_en, 
-            numpy.dot(numpy.linalg.inv(var_e), mean_e) + RE * label/self.var_x
+            numpy.dot(numpy.linalg.inv(var_e[i]), mean_e[i]) + RE * label/self.var_x
         )
 
-        mean_e = m_en
-        var_e = s_en
+        mean_e[i] = m_en
+        var_e[i] = s_en
 
-        m_en = m_en.reshape(m_en.shape[0]).tolist()
+        # m_en = m_en.reshape(m_en.shape[0]).tolist()
         E[i] = multivariate_normal(m_en, s_en)
 
         # sample entity e_j
 
         ETR = numpy.dot(e_i.T, r_k) # D x 1
-        ETR = ETR.reshape((1, ETR.shape[0]))
+        # ETR = ETR.reshape((1, ETR.shape[0]))
 
         # D x D
-        s_en = numpy.linalg.inv(
-            numpy.linalg.inv(var_e) + 
-            numpy.dot(ETR.T, ETR)/self.var_x
-        )
+        s_en_inv = numpy.linalg.inv(var_e[j]) + numpy.dot(ETR.T, ETR)/self.var_x
+        s_en_inv += numpy.identity(s_en_inv.shape[0]) * m
+        logging.debug('s_en_inv: {}'.format(s_en_inv))
+        s_en = numpy.linalg.inv(s_en_inv)
 
         # D x 1
         m_en = numpy.dot(
             s_en,
-            numpy.dot(numpy.linalg.inv(var_e), mean_e) + ETR.T * label/self.var_x)
+            numpy.dot(numpy.linalg.inv(var_e[j]), mean_e[j]) + ETR.T * label/self.var_x)
 
-        mean_e = m_en
-        var_e = s_en
+        mean_e[j] = m_en
+        var_e[j] = s_en
 
-        m_en = m_en.reshape(m_en.shape[0]).tolist()
+        # m_en = m_en.reshape(m_en.shape[0]).tolist()
         E[j] = multivariate_normal(m_en, s_en)
 
-        return mean_e, mean_r, var_e, var_r
+        # return mean_e, mean_r, var_e, var_r
 
 
 # Helper functions to generate predictor classes.

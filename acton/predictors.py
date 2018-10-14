@@ -528,10 +528,10 @@ class TensorPredictor(Predictor):
         self.mean_r = mean_r
         self.var_x = var_x
 
-        self.var_e = numpy.ones(self.n_particles) * self.var_e
-        self.var_r = numpy.ones(self.n_particles) * self.var_r
-        self.mean_e = numpy.ones(self.n_particles) * self.mean_e
-        self.mean_r = numpy.ones(self.n_particles) * self.mean_r
+        self.var_e = list(numpy.ones(self.n_particles) * self.var_e)
+        self.var_r = list(numpy.ones(self.n_particles) * self.var_r)
+        self.mean_e = list(numpy.ones(self.n_particles) * self.mean_e)
+        self.mean_r = list(numpy.ones(self.n_particles) * self.mean_r)
 
         self.p_weights = numpy.ones(self.n_particles) / self.n_particles
 
@@ -545,6 +545,7 @@ class TensorPredictor(Predictor):
         self.X = self._db.read_labels(all_)  # read all labels
 
     def fit(self, ids: Iterable[tuple],
+            n_initial_labels: int,
             inc_sub: bool,
             subn_entities: int,
             subn_relations: int,
@@ -555,6 +556,8 @@ class TensorPredictor(Predictor):
         ----------
         ids
             List of IDs of labelled instances.
+        n_initial_labels
+            number of initial labels
         inc_sub
             indicates whether increasing subsampling size when gets more labels
         subn_entities
@@ -613,7 +616,6 @@ class TensorPredictor(Predictor):
 
         # only consider the situation where one element is recommended each time
         next_idx = ids[-1]
-        logging.debug('new index: {} and label: {}'.format(next_idx, self.X[next_idx]))
 
         self.p_weights *= \
             self.compute_particle_weight(next_idx, cur_obs, obs_mask)
@@ -624,28 +626,37 @@ class TensorPredictor(Predictor):
         if ESS < self.n_particles / 2.:
             self.resample()
 
-        if self.subn_entities == self.n_entities \
-                and self.subn_relations == self.n_relations:
-            logging.debug("Sampling all.")
-            sub_relids = None
-            sub_entids = None
-        else:
-            logging.debug("Subsampling {} entities and {} relations".format(
-                self.subn_entities, self.subn_relations))
-            sub_relids = numpy.random.choice(
-                self.n_relations, self.subn_relations, replace=False)
-            sub_entids = numpy.random.choice(
-                self.n_entities, self.subn_entities, replace=False)
-
         if update_one:
-            for p in range(self.n_particles):
-                self._sample_latent_variables(
-                    next_idx, self.X[next_idx], 
-                    self.mean_e[p], self.mean_r[p],
-                    self.var_e[p], self.var_r[p],
-                    self.E[p], self.R[p]
-                )
+            
+            if n_initial_labels == len(ids):
+                next_idxs = ids
+            else:
+                next_idxs = [next_idx]
+
+            for next_idx in next_idxs:
+                for p in range(self.n_particles):
+                    logging.debug('update one: {} using label: {}'.format(next_idx, self.X[next_idx]))
+                    self.mean_e[p], self.mean_r[p], self.var_e[p], self.var_r[p]=\
+                        self._sample_latent_variables(
+                            next_idx, self.X[next_idx], 
+                            self.mean_e[p], self.mean_r[p],
+                            self.var_e[p], self.var_r[p],
+                            self.E[p], self.R[p]
+                            )
+            logging.debug('E[0]: {}'.format(self.E[0]))
         else:
+            if self.subn_entities == self.n_entities \
+                and self.subn_relations == self.n_relations:
+                logging.debug("Sampling all.")
+                sub_relids = None
+                sub_entids = None
+            else:
+                logging.debug("Subsampling {} entities and {} relations".format(
+                    self.subn_entities, self.subn_relations))
+                sub_relids = numpy.random.choice(
+                    self.n_relations, self.subn_relations, replace=False)
+                sub_entids = numpy.random.choice(
+                    self.n_entities, self.subn_entities, replace=False)
             for p in range(self.n_particles):
                 self._sample_relations(
                     cur_obs, obs_mask,
@@ -883,6 +894,8 @@ class TensorPredictor(Predictor):
             mean_e = numpy.ones((self.n_dim, 1)) * mean_e      # D x 1
             mean_r = numpy.ones((self.n_dim ** 2, 1)) * mean_r # D^2 x 1
 
+        logging.debug('mean_e: {}'.format(mean_e))
+
         # sample relation r_k
         k, i, j = index
         e_i = E[i].T # D x 1
@@ -897,7 +910,7 @@ class TensorPredictor(Predictor):
             numpy.linalg.inv(var_r) +
             numpy.dot(EXE, EXE.T)/self.var_x
         )
-        pp = numpy.dot(numpy.linalg.inv(var_r), mean_r) + EXE * label/self.var_x
+
         # D^2 x 1
         m_rn = numpy.dot(
             s_rn,
@@ -955,6 +968,8 @@ class TensorPredictor(Predictor):
 
         m_en = m_en.reshape(m_en.shape[0]).tolist()
         E[j] = multivariate_normal(m_en, s_en)
+
+        return mean_e, mean_r, var_e, var_r
 
 
 # Helper functions to generate predictor classes.

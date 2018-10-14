@@ -228,6 +228,7 @@ def simulate_active_learning(
         then = time.time()
         if labeller_name == 'GraphDatabaseLabeller':
             predictor.fit(labelled_ids,
+                          n_initial_labels,
                           inc_sub=inc_sub,
                           subn_entities=subn_entities,
                           subn_relations=subn_relations,

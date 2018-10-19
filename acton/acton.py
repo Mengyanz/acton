@@ -227,7 +227,7 @@ def simulate_active_learning(
         logging.debug('Fitting predictor.')
         then = time.time()
         if labeller_name == 'GraphDatabaseLabeller':
-            predictor.fit(labelled_ids,
+            mean_r = predictor.fit(labelled_ids,
                           n_initial_labels,
                           inc_sub=inc_sub,
                           subn_entities=subn_entities,
@@ -318,7 +318,7 @@ def simulate_active_learning(
         run_time.append(end_epoch - begin_epoch)
 
     if labeller_name == 'GraphDatabaseLabeller':
-        return train_error_list, test_error_list, gain_ts, run_time
+        return train_error_list, test_error_list, gain_ts, run_time, mean_r
     else:
         return 0
 

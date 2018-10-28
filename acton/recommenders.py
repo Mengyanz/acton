@@ -374,6 +374,7 @@ class EntropyRecommender(Recommender):
             warnings.filterwarnings(action='ignore', category=RuntimeWarning)
             proximities = -predictions * numpy.log(predictions)
 
+        # do not need to take max?
         proximities = proximities.sum(axis=1).max(axis=1).ravel()
         proximities[numpy.isnan(proximities)] = float('-inf')
 
@@ -468,7 +469,8 @@ class ThompsonSamplingRecommender(Recommender):
     def recommend(self, ids: Sequence[tuple],
                   predictions: numpy.ndarray,
                   n: int=1, diversity: float=0.0,
-                  repreated_labelling: bool = True) -> Sequence[int]:
+                  repreated_labelling: bool = True,
+                  recommend_method: str='TS') -> Sequence[int]:
         """Recommends an instance to label.
 
         Notes
@@ -485,7 +487,7 @@ class ThompsonSamplingRecommender(Recommender):
             Number of recommendations to make.
         diversity
             recommend methods selection.
-            0.5 represents Thompson Samplig;
+            0.0 represents Thompson Samplig;
             1.0 represents Random Sampling
         repeated_labelling
             whether allow one instance to be labelled more than once
@@ -513,8 +515,15 @@ class ThompsonSamplingRecommender(Recommender):
 
         if diversity == 0.0:
             predictions[mask == 1] = MIN_VAL
-            return [numpy.unravel_index(predictions.argmax(),
-                    predictions.shape)]
+
+            if recommend_method == 'TS':
+                # Thompson sampling:
+                return [numpy.unravel_index(predictions.argmax(),
+                                            predictions.shape)]
+            elif recommend_method == 'LC':
+                # uncertainty sampling (least confidence):
+                return [numpy.unravel_index(abs(0.5 - predictions).argmin(),
+                                            predictions.shape)]
         else:
             correct = False
             while not correct:

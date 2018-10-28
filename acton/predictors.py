@@ -526,7 +526,7 @@ class TensorPredictor(Predictor):
         self.var_r = var_r
         self.mean_e = mean_e
         self.mean_r = mean_r
-        self.var_x = var_x    
+        self.var_x = var_x
 
         self.p_weights = numpy.ones(self.n_particles) / self.n_particles
 
@@ -559,11 +559,11 @@ class TensorPredictor(Predictor):
             number of entities for subsampling
         subn_relations
             number of relations for subsampling
-        update_one 
+        update_one
             Boolean variable
-            True: only update posterior entity and relations 
+            True: only update posterior entity and relations
                   related to the new label
-            False: update all 
+            False: update all
 
         Returns
         -------
@@ -597,7 +597,7 @@ class TensorPredictor(Predictor):
             numpy.nonzero(numpy.sum(numpy.sum(self.X, 1), 1))[0]
         # totoal_size = self.n_relations * self.n_entities * self.n_dim
 
-        # subsampling 
+        # subsampling
         if numpy.sum(self.obs_sum) > 1000:
             self.subn_entities = 10
             self.subn_relations = 10
@@ -622,18 +622,21 @@ class TensorPredictor(Predictor):
             self.resample()
 
         if update_one:
-            
+
             if n_initial_labels == len(ids):
                 next_idxs = ids
             else:
                 next_idxs = [next_idx]
 
             if isinstance(self.var_e, float) and isinstance(self.var_r, float)\
-                    and isinstance(self.mean_e, float) and isinstance(self.mean_r, float):
+                    and isinstance(self.mean_e, float)\
+                    and isinstance(self.mean_r, float):
                 self.mean_e = numpy.ones((
-                    self.n_particles, self.n_entities, self.n_dim)) * self.mean_e      # P x N x D 
+                    self.n_particles, self.n_entities, self.n_dim)
+                    ) * self.mean_e      # P x N x D
                 self.mean_r = numpy.ones((
-                    self.n_particles, self.n_relations, self.n_dim ** 2)) * self.mean_r    # P x K x D^2
+                    self.n_particles, self.n_relations, self.n_dim ** 2)
+                    ) * self.mean_r    # P x K x D^2
 
                 var_e = self.var_e
                 var_r = self.var_r
@@ -642,25 +645,29 @@ class TensorPredictor(Predictor):
                     self.n_particles, self.n_entities, self.n_dim, self.n_dim))
                 # P x N x D^2 x D^2
                 self.var_r = numpy.zeros((
-                    self.n_particles, self.n_relations, self.n_dim ** 2, self.n_dim ** 2))
+                    self.n_particles, self.n_relations,
+                    self.n_dim ** 2, self.n_dim ** 2))
 
                 for p in range(self.n_particles):
                     for i in range(self.var_e.shape[1]):
-                        self.var_e[p][i]= numpy.identity(self.n_dim) * var_e 
+                        self.var_e[p][i] = numpy.identity(self.n_dim) * var_e
                     for k in range(self.var_r.shape[1]):
-                        self.var_r[p][k] = numpy.identity(self.n_dim ** 2) * var_r  
+                        self.var_r[p][k] = numpy.identity(
+                            self.n_dim ** 2) * var_r
 
             for next_idx in next_idxs:
                 for p in range(self.n_particles):
-                    
-                    #self.mean_e[p], self.mean_r[p], self.var_e[p], self.var_r[p]=\
+
+                    # self.mean_e[p], self.mean_r[p],\
+                    # self.var_e[p], self.var_r[p]=\
                     self._sample_latent_variables(
-                        next_idx, self.X[next_idx], 
+                        next_idx, self.X[next_idx],
                         self.mean_e[p], self.mean_r[p],
                         self.var_e[p], self.var_r[p],
                         self.E[p], self.R[p]
                         )
-            logging.debug('update one: {} using label: {}'.format(next_idx, self.X[next_idx]))
+            logging.debug('update one: {} using label: {}'.format(
+                next_idx, self.X[next_idx]))
             # logging.debug('s_en_inv: {}'.format(s_en_inv))
             # logging.debug('ETR: {}'.format(ETR))
             # logging.debug('mean_r[0]: {}'.format(self.mean_r[0]))
@@ -668,13 +675,14 @@ class TensorPredictor(Predictor):
 
         else:
             if isinstance(self.var_e, float) and isinstance(self.var_r, float)\
-                    and isinstance(self.mean_e, float) and isinstance(self.mean_r, float):
+                    and isinstance(self.mean_e, float)\
+                    and isinstance(self.mean_r, float):
                 self.var_e = list(numpy.ones(self.n_particles) * self.var_e)
                 self.var_r = list(numpy.ones(self.n_particles) * self.var_r)
                 self.mean_e = list(numpy.ones(self.n_particles) * self.mean_e)
-                self.mean_r = list(numpy.ones(self.n_particles) * self.mean_r)  
+                self.mean_r = list(numpy.ones(self.n_particles) * self.mean_r)
             if self.subn_entities == self.n_entities \
-                and self.subn_relations == self.n_relations:
+                    and self.subn_relations == self.n_relations:
                 logging.debug("Sampling all.")
                 sub_relids = None
                 sub_entids = None
@@ -704,7 +712,7 @@ class TensorPredictor(Predictor):
 
         if self.sample_prior:
             self._sample_prior()
-        
+
         return self.mean_r[0]
 
     def predict(self, ids: Sequence[int] = None) -> (numpy.ndarray, None):
@@ -892,7 +900,7 @@ class TensorPredictor(Predictor):
     def _sample_latent_variables(
             self, index, label, mean_e, mean_r, var_e, var_r, E, R):
         '''
-        In t^th iteration, we get the new label x_ikj. 
+        In t^th iteration, we get the new label x_ikj.
         Then update e_i, e_j, r_k using the new label.
 
         Parameters:
@@ -903,7 +911,7 @@ class TensorPredictor(Predictor):
             label x_kij, 0 or 1.
         mean_e
             mean of entity
-        mean_r 
+        mean_r
             mean of relation
         var_e
             variance of entitiy (sigma_e ^2)
@@ -912,21 +920,21 @@ class TensorPredictor(Predictor):
         E
             posterior of latent entity variable R^{N x D}
             updated from last iteration
-        R 
+        R
             posterior of latent relation variable R^{ K x D x D}
             updated from last iteration
         '''
 
         # sample relation r_k
         k, i, j = index
-        e_i = E[i].reshape(E[i].shape[0],1) # D x 1
-        e_j = E[j].reshape(E[j].shape[0],1) # D x 1
-        r_k = R[k]                          # D x D
+        e_i = E[i].reshape(E[i].shape[0], 1)  # D x 1
+        e_j = E[j].reshape(E[j].shape[0], 1)  # D x 1
+        r_k = R[k]                            # D x D
 
-        mean_ei = mean_e[i].reshape(mean_e[i].shape[0],1) # D x 1
-        mean_ej = mean_e[j].reshape(mean_e[j].shape[0],1) # D x 1
-        mean_rk = mean_r[k].reshape(mean_r[k].shape[0],1) # D^2 x 1
-    
+        mean_ei = mean_e[i].reshape(mean_e[i].shape[0], 1)  # D x 1
+        mean_ej = mean_e[j].reshape(mean_e[j].shape[0], 1)  # D x 1
+        mean_rk = mean_r[k].reshape(mean_r[k].shape[0], 1)  # D^2 x 1
+
         '''
         # avoid LinAlgError: Singular matrix error
         m = 10**-6
@@ -935,20 +943,22 @@ class TensorPredictor(Predictor):
         var_e[j] += numpy.identity(var_e[j].shape[0]) * m
         '''
 
-        EXE = numpy.kron(e_i, e_j) # D^2 x 1
+        EXE = numpy.kron(e_i, e_j)  # D^2 x 1
         # EXE = EXE.reshape((EXE.shape[0], 1))
         # logging.debug('EXE shape: {}'.format(EXE.shape))
         # logging.debug('var_r[k] shape: {}'.format(var_r[k].shape))
-    
+
         # D^2 x D^2
-        s_rn_inv =  numpy.linalg.inv(var_r[k]) + numpy.dot(EXE, EXE.T)/self.var_x
+        s_rn_inv = numpy.linalg.inv(
+            var_r[k]) + numpy.dot(EXE, EXE.T)/self.var_x
         # s_rn_inv += numpy.identity(s_rn_inv.shape[0]) * m
         s_rn = numpy.linalg.inv(s_rn_inv)
 
         # D^2 x 1
         m_rn = numpy.dot(
             s_rn,
-            numpy.dot(numpy.linalg.inv(var_r[k]), mean_rk) + EXE * label/self.var_x
+            numpy.dot(numpy.linalg.inv(var_r[k]),
+                      mean_rk) + EXE * label/self.var_x
         )
 
         m_rn = m_rn.reshape(m_rn.shape[0])
@@ -962,7 +972,7 @@ class TensorPredictor(Predictor):
 
         # sample entity e_i
 
-        RE = numpy.dot(r_k, e_j) # D x 1
+        RE = numpy.dot(r_k, e_j)  # D x 1
         # RE = RE.reshape((RE.shape[0], 1))
 
         # D x D
@@ -972,8 +982,9 @@ class TensorPredictor(Predictor):
 
         # D x 1
         m_en = numpy.dot(
-            s_en, 
-            numpy.dot(numpy.linalg.inv(var_e[i]), mean_ei) + RE * label/self.var_x
+            s_en,
+            numpy.dot(numpy.linalg.inv(var_e[i]),
+                      mean_ei) + RE * label/self.var_x
         )
 
         m_en = m_en.reshape(m_en.shape[0])
@@ -985,7 +996,7 @@ class TensorPredictor(Predictor):
 
         # sample entity e_j
 
-        ETR = numpy.dot(e_i.T, r_k) # 1 x D 
+        ETR = numpy.dot(e_i.T, r_k)  # 1 x D
         # logging.debug('ETR shape: {}'.format(ETR.shape))
         # ETR = ETR.reshape((1, ETR.shape[0])) # 1 x D
 
@@ -994,16 +1005,16 @@ class TensorPredictor(Predictor):
         # s_en_inv += numpy.identity(s_en_inv.shape[0]) * m
         # logging.debug('s_en_inv: {}'.format(s_en_inv))
         # logging.debug('ETR: {}'.format(ETR))
-        # logging.debug('numpy.dot(ETR.T, ETR): {}'.format(numpy.dot(ETR.T, ETR)))
-        # logging.debug('s_en_inv: {}'.format(s_en_inv))
-       
+
         s_en = numpy.linalg.inv(s_en_inv)
 
         # D x 1
         m_en = numpy.dot(
             s_en,
-            numpy.dot(numpy.linalg.inv(var_e[j]), mean_ej) + ETR.T * label/self.var_x)
-        
+            numpy.dot(
+                numpy.linalg.inv(var_e[j]), mean_ej) + ETR.T * label/self.var_x
+                )
+
         m_en = m_en.reshape(m_en.shape[0])
         mean_e[j] = m_en
         var_e[j] = s_en

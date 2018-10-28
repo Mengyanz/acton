@@ -16,7 +16,7 @@ import sklearn.linear_model
 import sklearn.metrics
 import sklearn.model_selection
 import sklearn.preprocessing
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, accuracy_score
 
 T = TypeVar('T')
 
@@ -91,12 +91,13 @@ def simulate_active_learning(
         predictor: str = 'LogisticRegression',
         labeller: str = 'DatabaseLabeller',
         n_recommendations: int = 1,
-        diversity: float = 0.5,
+        diversity: float = 0.0,
         repeated_labelling: bool = True,
         inc_sub: bool = False,
         subn_entities: int=0,
         subn_relations: int=0,
-        update_one: bool=True):
+        update_one: bool=True,
+        recommend_method: str='TS'):
     """Simulates an active learning task.
 
     Parameters
@@ -133,10 +134,12 @@ def simulate_active_learning(
         number of relations for subsampling
     update_one
         Boolean variable
-        True: only update posterior entity and relations 
+        True: only update posterior entity and relations
                 related to the new label
-        False: update all 
+        False: update all
     """
+
+    logging.debug("update one: {}".format(update_one))
     validate_recommender(recommender)
     validate_predictor(predictor)
 
@@ -200,6 +203,9 @@ def simulate_active_learning(
     train_error_list = []
     test_error_list = []
 
+    train_acc_list = []
+    test_acc_list = []
+
     gain_ts = []
     run_time = []
 
@@ -228,11 +234,11 @@ def simulate_active_learning(
         then = time.time()
         if labeller_name == 'GraphDatabaseLabeller':
             mean_r = predictor.fit(labelled_ids,
-                          n_initial_labels,
-                          inc_sub=inc_sub,
-                          subn_entities=subn_entities,
-                          subn_relations=subn_relations,
-                          update_one= update_one)
+                                   n_initial_labels,
+                                   inc_sub=inc_sub,
+                                   subn_entities=subn_entities,
+                                   subn_relations=subn_relations,
+                                   update_one=update_one)
         else:
             predictor.fit(labelled_ids)
         logging.debug('(Took {:.02} s.)'.format(time.time() - then))
@@ -282,7 +288,8 @@ def simulate_active_learning(
 
             recommendations = recommender.recommend(
                 unlabelled_ids, predictions, n=n_recommendations,
-                diversity=diversity, repreated_labelling=repeated_labelling)
+                diversity=diversity, repreated_labelling=repeated_labelling,
+                recommend_method=recommend_method)
             logging.debug('Recommending: {}'.format(recommendations))
 
             # compute ROC_AUC_SCORE
@@ -295,6 +302,25 @@ def simulate_active_learning(
 
             train_error_list.append(train_error)
             test_error_list.append(test_error)
+
+            # compute accuracy
+
+            # if the predictions is bigger than 0.5,
+            # then we label the instance as 1; otherwise 0
+            predict_labels = numpy.ones_like(predictions)
+            predict_labels[predictions <= 0.5] = 0
+
+            train_acc = accuracy_score(
+                true_labels[train_x, train_y, train_z].flatten(),
+                predict_labels[train_x, train_y, train_z].flatten()
+            )
+            test_acc = accuracy_score(
+                true_labels[test_x, test_y, test_z].flatten(),
+                predict_labels[test_x, test_y, test_z].flatten()
+            )
+
+            train_acc_list.append(train_acc)
+            test_acc_list.append(test_acc)
 
             # compute cumulative gain
             idx = numpy.unravel_index(
@@ -318,7 +344,8 @@ def simulate_active_learning(
         run_time.append(end_epoch - begin_epoch)
 
     if labeller_name == 'GraphDatabaseLabeller':
-        return train_error_list, test_error_list, gain_ts, run_time, mean_r
+        return train_error_list, test_error_list,\
+            gain_ts, run_time, mean_r, train_acc_list, test_acc_list
     else:
         return 0
 

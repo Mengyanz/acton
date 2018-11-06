@@ -1025,6 +1025,126 @@ class TensorPredictor(Predictor):
         # return mean_e, mean_r, var_e, var_r
         return s_en_inv, ETR
 
+class UncertaintyTensorPredictor(TensorPredictor):
+    """Predict uncertainty for each tensor entry.
+       Using uncer(x_ijk) = uncer(e_i)^T uncer(R_k) uncer(e_j)
+
+    Attributes
+    ----------
+    _db : acton.database.Database
+        Database storing features and labels.
+    n_particles:
+        Number of particles for Thompson sampling.
+    n_relations:
+        Number of relations (K)
+    n_entities:
+        Number of entities (N)
+    n_dim
+        Number of latent dimensions (D)
+    var_r
+        variance of prior of R
+    var_e
+        variance of prior of E
+    var_x
+        variance of X
+    sample_prior
+        indicates whether sample prior
+    E
+        P x N x D entity features
+    R
+        P x K x D x D relation features
+    X
+        K x N x N labels
+    """
+
+    def __init__(self,
+                 db: acton.database.Database,
+                 n_particles: int = 5,
+                 var_r: float = 1.0, var_e: float = 1.0,
+                 mean_r: float = 0.0, mean_e: float = 0.0,
+                 var_x: float = 0.1,
+                 sample_prior: bool = False,
+                 n_jobs: int=1
+                 ):
+        """
+        Arguments
+        ---------
+        db
+            Database storing features and labels.
+        n_particles:
+            Number of particles for Thompson sampling.
+        var_r
+            variance of prior of R
+        var_e
+            variance of prior of E
+        mean_r
+            mean of prior of R
+        mean_e
+            mean of prior of E
+        var_x
+            variance of X
+        sample_prior
+            indicates whether sample prior
+        """
+
+        super().__init__(
+            db, n_particles, var_r, var_e,
+            mean_r, mean_e, var_x, sample_prior, n_jobs)
+
+    def _sample_entity(self, X, mask, E, R, i, var_e, RE=None, RTE=None):
+        nz_r = mask[:, i, :].nonzero()
+        nz_c = mask[:, :, i].nonzero()
+        nnz_r = nz_r[0].size
+        nnz_c = nz_c[0].size
+        nnz_all = nnz_r + nnz_c
+
+        self.features[:nnz_r] = RE[nz_r]
+        self.features[nnz_r:nnz_all] = RTE[nz_c]
+        self.xi[:nnz_r] = X[:, i, :][nz_r]
+        self.xi[nnz_r:nnz_all] = X[:, :, i][nz_c]
+        _xi = self.xi[:nnz_all] * self.features[:nnz_all].T
+        xi = numpy.sum(_xi, 1) / self.var_x
+
+        _lambda = numpy.identity(self.n_dim) / var_e
+        _lambda += numpy.dot(
+            self.features[:nnz_all].T,
+            self.features[:nnz_all]) / self.var_x
+
+        # mu = numpy.linalg.solve(_lambda, xi)
+        # E[i] = normal(mu, _lambda)
+
+        inv_lambda = numpy.linalg.inv(_lambda)
+        mu = numpy.dot(inv_lambda, xi)
+        # E[i] = multivariate_normal(mu, inv_lambda)
+        # update E using the uncertainty (variance)
+        E[i] = inv_lambda
+
+        # numpy.mean(numpy.diag(inv_lambda))
+        # logging.info('Mean variance E, %d, %f', i, mean_var)
+
+    def _sample_relation(self, X, mask, E, R, k, EXE, var_r):
+        _lambda = numpy.identity(self.n_dim ** 2) / var_r
+        xi = numpy.zeros(self.n_dim ** 2)
+
+        kron = EXE[mask[k].flatten() == 1]
+
+        if kron.shape[0] != 0:
+            _lambda += numpy.dot(kron.T, kron)
+            xi += numpy.sum(X[k, mask[k] == 1].flatten() * kron.T, 1)
+
+        _lambda /= self.var_x
+        # mu = numpy.linalg.solve(_lambda, xi) / self.var_x
+
+        inv_lambda = numpy.linalg.inv(_lambda)
+        mu = numpy.dot(inv_lambda, xi) / self.var_x
+        # R[k] = normal(mu, _lambda).reshape([self.n_dim, self.n_dim])
+        # R[k] = multivariate_normal(
+        #     mu, inv_lambda).reshape([self.n_dim, self.n_dim])
+        # update R using the uncertainty (variance)
+        R[k] = inv_lambda.reshape([self.n_dim, self.n_dim])
+
+        numpy.mean(numpy.diag(inv_lambda))
+        # logging.info('Mean variance R, %d, %f', k, mean_var)
 
 # Helper functions to generate predictor classes.
 
@@ -1054,5 +1174,6 @@ PREDICTORS = {
     'LinearRegression': _linear_regression(),
     'KDE': _kde(),
     'GPC': GPClassifier,
-    'TensorPredictor': TensorPredictor
+    'TensorPredictor': TensorPredictor,
+    'UncertaintyTensorPredictor': UncertaintyTensorPredictor
 }

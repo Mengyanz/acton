@@ -516,8 +516,9 @@ class ThompsonSamplingRecommender(Recommender):
         if diversity == 0.0:
             predictions[mask == 1] = MIN_VAL
 
-            if recommend_method == 'TS':
-                # Thompson sampling:
+            if recommend_method == 'TS' or recommend_method == 'US':
+                # Thompson sampling or 
+                # Uncertainty model specified by "UncertaintyTensorPredictor":
                 return [numpy.unravel_index(predictions.argmax(),
                                             predictions.shape)]
             elif recommend_method == 'LC':
